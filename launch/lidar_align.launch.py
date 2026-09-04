@@ -45,18 +45,15 @@ def generate_launch_description():
             'max_point_distance': 30.0,   # 30.0
             
             'local': True,               # True=仅 Local；False=先 Global 再 Local
-            # z 平移固定，不参与优化：
-            #   local=True  -> z 固定为 inital_guess[2]
-            #   local=False -> z 固定为 0.0（Global 后的 Local 阶段也保持 0.0）
             # time_cal=True ：优化 6 个变量 [x, y, rx, ry, rz, time_offset]
             # time_cal=False：优化 5 个变量 [x, y, rx, ry, rz]
             'time_cal': True,             # True
-            'inital_guess': [-0.40, 0.0, 0.6, 0.0, 0.0, 0.0, 0.0],
+            'inital_guess': [-0.50, 0.08, -0.62, 0.0, 0.0, 0.0, 0.0],  # [-0.40, 0.0, 0.6, 0.0, 0.0, 0.0, 0.0]
             'max_time_offset': 0.1,       # 0.1
             
-            'max_evals': 200.0,          # 1000 次最大评估
+            'max_evals': 50.0,          # 1000 次最大评估
             'xtol': 0.0001,               # 默认值 0.0001
-            'local_knn_max_dist': 0.5,    # 0.5
+            'local_knn_max_dist': 0.1,    # 0.1
             'knn_batch_size': 2000,       # 仅KNN串行分块大小；不再创建异步线程
             'local_optimization_max_points': 0,   # 0=局部优化使用全部保留点
             'global_optimization_max_points': 0   # 0=全局优化使用全部保留点
