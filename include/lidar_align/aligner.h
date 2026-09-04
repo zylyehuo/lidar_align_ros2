@@ -46,6 +46,11 @@ class Aligner {
     Odom* odom;
     Aligner* aligner;
     bool time_cal;
+
+    // Z translation is intentionally not an optimization variable.
+    // local=true  -> fixed_z comes from inital_guess[2].
+    // local=false -> fixed_z is forced to 0.0 for both Global and Local stages.
+    double fixed_z = 0.0;
   };
 
   explicit Aligner(const Config& config);

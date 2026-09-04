@@ -161,16 +161,37 @@ double Aligner::LidarOdomMinimizer(const std::vector<double>& x,
                                    void* f_data) {
   OptData* d = static_cast<OptData*>(f_data);
 
-  if (x.size() > 6) {
-    d->lidar->setOdomOdomTransforms(*(d->odom), x[6]);
+  // Parameterization:
+  //   Global rotation stage: [rx, ry, rz]
+  //   Local, time_cal=false: [x, y, rx, ry, rz]
+  //   Local, time_cal=true : [x, y, rx, ry, rz, time_offset]
+  // z is never optimized. It is supplied through OptData::fixed_z.
+  if (x.size() == 6) {
+    d->lidar->setOdomOdomTransforms(*(d->odom), x[5]);
   }
 
   Eigen::Matrix<double, 6, 1> vec;
   vec.setZero();
+  vec[2] = d->fixed_z;
 
-  const size_t offset = (x.size() == 3) ? 3 : 0;
-  for (size_t i = offset; i < 6; ++i) {
-    vec[static_cast<Eigen::Index>(i)] = x[i - offset];
+  if (x.size() == 3) {
+    // Global stage only searches rotation. Translation is fixed at
+    // x=y=z=0 in the objective; fixed_z is explicitly forced to 0 when
+    // local=false by lidarOdomTransform().
+    vec[3] = x[0];
+    vec[4] = x[1];
+    vec[5] = x[2];
+  } else if (x.size() == 5 || x.size() == 6) {
+    vec[0] = x[0];
+    vec[1] = x[1];
+    vec[3] = x[2];
+    vec[4] = x[3];
+    vec[5] = x[4];
+  } else {
+    std::ostringstream ss;
+    ss << "Unexpected optimizer dimension " << x.size()
+       << "; expected 3 (global), 5 (local), or 6 (local+time).";
+    throw std::runtime_error(ss.str());
   }
 
   d->lidar->setOdomLidarTransform(Transform::exp(vec.cast<float>()));
@@ -187,8 +208,8 @@ double Aligner::LidarOdomMinimizer(const std::vector<double>& x,
     fprintf(tty,
             " \033[1mrx:\033[0m %6.2f \033[1mry:\033[0m %6.2f \033[1mrz:\033[0m %6.2f",
             vec[3], vec[4], vec[5]);
-    if (x.size() > 6) {
-      fprintf(tty, " \033[1mtime:\033[0m %7.4f", x[6]);
+    if (x.size() == 6) {
+      fprintf(tty, " \033[1mtime:\033[0m %7.4f", x[5]);
     }
     fprintf(tty,
             " \033[1mError:\033[0m %12.2f \033[1mIteration:\033[0m %zu\033[K\r",
@@ -291,15 +312,37 @@ void Aligner::lidarOdomTransform(Lidar* lidar, Odom* odom) {
   opt_data.aligner = this;
   opt_data.time_cal = config_.time_cal;
 
-  const size_t num_params = config_.time_cal ? 7 : 6;
+  // Z translation is intentionally unobservable/disabled in this setup.
+  // Preserve the requested semantics exactly:
+  //   local=true  -> z = inital_guess[2]
+  //   local=false -> z = 0.0, including the subsequent Local refinement.
+  const bool requested_local_only = config_.local;
+  opt_data.fixed_z = requested_local_only && config_.inital_guess.size() > 2
+                         ? config_.inital_guess[2]
+                         : 0.0;
+
+  // Local parameterization excludes z completely:
+  //   time_cal=false: [x, y, rx, ry, rz]
+  //   time_cal=true : [x, y, rx, ry, rz, time_offset]
+  const size_t num_params = config_.time_cal ? 6 : 5;
   std::vector<double> x(num_params, 0.0);
 
-  // Safely copy the user guess. This fixes the old time_cal=false bug where a
-  // 7-element inital_guess replaced the required 6-element optimizer vector.
-  const size_t guess_count = std::min(num_params, config_.inital_guess.size());
-  for (size_t i = 0; i < guess_count; ++i) {
-    x[i] = config_.inital_guess[i];
+  // Map the original 7-element external guess
+  // [x, y, z, rx, ry, rz, time] to the reduced optimizer vector.
+  if (config_.inital_guess.size() > 0) x[0] = config_.inital_guess[0];
+  if (config_.inital_guess.size() > 1) x[1] = config_.inital_guess[1];
+  if (config_.inital_guess.size() > 3) x[2] = config_.inital_guess[3];
+  if (config_.inital_guess.size() > 4) x[3] = config_.inital_guess[4];
+  if (config_.inital_guess.size() > 5) x[4] = config_.inital_guess[5];
+  if (config_.time_cal && config_.inital_guess.size() > 6) {
+    x[5] = config_.inital_guess[6];
   }
+
+  std::cout << "Fixed Z translation: " << opt_data.fixed_z << " m ("
+            << (requested_local_only
+                    ? "local=true -> inital_guess[2]"
+                    : "local=false -> forced 0.0")
+            << ")" << std::endl;
 
   if (!config_.local) {
     std::cout << "\nPerforming Global Rotation Optimization..." << std::endl;
@@ -308,7 +351,7 @@ void Aligner::lidarOdomTransform(Lidar* lidar, Odom* odom) {
 
     std::vector<double> lb = {-M_PI, -M_PI, -M_PI};
     std::vector<double> ub = { M_PI,  M_PI,  M_PI};
-    std::vector<double> global_x = {x[3], x[4], x[5]};
+    std::vector<double> global_x = {x[2], x[3], x[4]};
 
     optimize(lb, ub, &opt_data, &global_x);
 
@@ -319,18 +362,19 @@ void Aligner::lidarOdomTransform(Lidar* lidar, Odom* odom) {
     }
 
     // Switch the objective and optimizer to local mode for refinement.
+    // IMPORTANT: fixed_z remains 0.0 because requested_local_only=false.
     config_.local = true;
-    x[3] = global_x[0];
-    x[4] = global_x[1];
-    x[5] = global_x[2];
+    x[2] = global_x[0];
+    x[3] = global_x[1];
+    x[4] = global_x[2];
   }
 
   std::cout << "\nPerforming Local Optimization..." << std::endl;
   std::cout << "Local objective point cap: "
             << config_.local_optimization_max_points << std::endl;
 
+  // Bounds correspond to reduced vector [x, y, rx, ry, rz, (time)].
   std::vector<double> lb = {
-      -config_.translation_range,
       -config_.translation_range,
       -config_.translation_range,
       -config_.angular_range,
@@ -340,12 +384,11 @@ void Aligner::lidarOdomTransform(Lidar* lidar, Odom* odom) {
   std::vector<double> ub = {
       config_.translation_range,
       config_.translation_range,
-      config_.translation_range,
       config_.angular_range,
       config_.angular_range,
       config_.angular_range};
 
-  for (size_t i = 0; i < 6; ++i) {
+  for (size_t i = 0; i < 5; ++i) {
     lb[i] += x[i];
     ub[i] += x[i];
   }
@@ -353,7 +396,7 @@ void Aligner::lidarOdomTransform(Lidar* lidar, Odom* odom) {
   if (config_.time_cal) {
     ub.push_back(config_.max_time_offset);
     lb.push_back(-config_.max_time_offset);
-    x[6] = std::max(lb[6], std::min(ub[6], x[6]));
+    x[5] = std::max(lb[5], std::min(ub[5], x[5]));
   }
 
   optimize(lb, ub, &opt_data, &x);
@@ -371,7 +414,7 @@ void Aligner::lidarOdomTransform(Lidar* lidar, Odom* odom) {
   }
 
   const double final_time_offset =
-      (config_.time_cal && x.size() > 6) ? x[6] : 0.0;
+      (config_.time_cal && x.size() == 6) ? x[5] : 0.0;
   const std::string output_calibration = generateCalibrationString(
       lidar->getOdomLidarTransform(), final_time_offset);
 
@@ -384,5 +427,6 @@ void Aligner::lidarOdomTransform(Lidar* lidar, Odom* odom) {
   std::cout << "\n\e[1mFinal Calibration:\e[0m\n"
             << output_calibration;
 }
+
 
 }  // namespace lidar_align

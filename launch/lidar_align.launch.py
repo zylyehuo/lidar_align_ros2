@@ -45,8 +45,11 @@ def generate_launch_description():
             'max_point_distance': 30.0,   # 30.0
             
             'local': True,               # True=仅 Local；False=先 Global 再 Local
-            # 如果 time_cal: True：算法需要优化 7 个变量 [x, y, z, rx, ry, rz, time_offset]。
-            # 如果 time_cal: False：算法只需要优化 6 个变量 [x, y, z, rx, ry, rz]
+            # z 平移固定，不参与优化：
+            #   local=True  -> z 固定为 inital_guess[2]
+            #   local=False -> z 固定为 0.0（Global 后的 Local 阶段也保持 0.0）
+            # time_cal=True ：优化 6 个变量 [x, y, rx, ry, rz, time_offset]
+            # time_cal=False：优化 5 个变量 [x, y, rx, ry, rz]
             'time_cal': True,             # True
             'inital_guess': [-0.40, 0.0, 0.6, 0.0, 0.0, 0.0, 0.0],
             'max_time_offset': 0.1,       # 0.1
