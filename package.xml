@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lidar_align</name>
+  <version>0.0.0</version>
+  <description>Aligns 3D lidars to a 6-dof pose source[ROS2 version]</description>
+  <maintainer email="zyl_0606@163.com">Yiliang Zhou</maintainer>
+  <license>BSD</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>pcl_conversions</depend>
+  <depend>rosbag2_cpp</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
